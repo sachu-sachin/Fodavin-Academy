@@ -11,8 +11,12 @@ pip install opencv-python-headless mediapipe numpy pillow
 
 ## Run
 ```bash
-python3 studio_render.py my_raw_video.mp4 my_studio_video.mp4
+python3 remove_pauses.py my_raw_video.mp4 tight.mp4
 ```
+```bash
+python3 studio_render.py tight.mp4 my_studio_video.mp4
+```
+`remove_pauses.py` cuts silences longer than 0.4 s, keeping 0.12 s of breathing room on each side (`--min-pause`, `--pad`). Skip that step to keep every pause.
 Options: `--subject-x 1120` (where you sit horizontally), `--crf 17` (quality; lower = bigger file), `--bg studio_bg.png`.
 
 The script processes frames as a stream, so memory use stays flat for 15+ minute videos. On a 4-core CPU it runs at about 1.7 fps, so a 15-minute video takes roughly 4–5 hours.

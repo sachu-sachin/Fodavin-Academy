@@ -80,6 +80,12 @@ def main():
     bg = cv2.cvtColor(cv2.imread(a.bg), cv2.COLOR_BGR2RGB).astype(np.float32)
     bg = cv2.resize(bg, (OW, OH))
     x0 = a.subject_x - sw // 2
+    clahe = cv2.createCLAHE(clipLimit=1.6, tileGridSize=(8, 8))
+    # blurred studio plate behind the subject, used for light wrap
+    bgb = cv2.GaussianBlur(bg, (0, 0), 30)
+    bgblur_sub = np.zeros((OH, sw, 3), np.float32)
+    lo, hi = max(0, x0), min(OW, x0 + sw)
+    bgblur_sub[:, lo - x0:hi - x0] = bgb[:, lo:hi]
 
     dec = subprocess.Popen(["ffmpeg", "-v", "error", "-i", a.inp, "-vf",
         f"crop={cw}:{ch}:{cx}:{cy},hqdn3d=2:1.5:4:3,scale={sw}:{sh}:flags=lanczos",
@@ -114,6 +120,8 @@ def main():
                                              data=np.ascontiguousarray(small)), int(i * 1000 / fps))
         m = 1.0 - res.confidence_masks[0].numpy_view().astype(np.float32)
         hair = res.confidence_masks[1].numpy_view().astype(np.float32)
+        face = res.confidence_masks[3].numpy_view().astype(np.float32)
+        skin = face + res.confidence_masks[2].numpy_view().astype(np.float32)
         m = cv2.resize(m, (sw // 2, sh // 2), interpolation=cv2.INTER_LINEAR)
         gray = cv2.cvtColor(small, cv2.COLOR_RGB2GRAY).astype(np.float32) / 255
         m = np.clip(guided(gray, m, r=6, eps=4e-3), 0, 1)
@@ -135,11 +143,30 @@ def main():
         lum = subj.mean(axis=2, keepdims=True)
         subj = np.where(edge, subj * 0.8 + lum * 0.2, subj)
 
-        # brand rim light from the mask edge (violet left, electric blue right)
-        rim = np.clip(m - cv2.GaussianBlur(m, (0, 0), 10), 0, 1)
+        # ---- studio lighting ----
+        # key light: soft pool of light on the face/skin from front-left (softbox)
+        fpool = cv2.GaussianBlur(cv2.resize(skin, (sw // 8, sh // 8)), (0, 0), 6)
+        fpool = cv2.resize(fpool / (fpool.max() + 1e-6), (sw, sh))[..., None]
+        keydir = np.clip(1.15 - xx / sw * 0.5, 0.75, 1.1)[..., None]
+        subj = subj * (1 + 0.22 * fpool * keydir)
+        # face clarity: gentle local contrast (like a sharper lens), no smoothing
+        lab = cv2.cvtColor(subj.clip(0, 255).astype(np.uint8), cv2.COLOR_RGB2LAB)
+        lab[..., 0] = clahe.apply(lab[..., 0])
+        cl = cv2.cvtColor(lab, cv2.COLOR_LAB2RGB).astype(np.float32)
+        subj = subj * 0.6 + cl * 0.4
+        # overall subject fall-off (lower body slightly darker -> face draws the eye)
+        subj *= (1.0 - 0.18 * np.clip((yy / sh - 0.55) / 0.45, 0, 1))[..., None]
+
+        # rim / hair lights: violet from left, electric blue from right
+        rim = np.clip(m - cv2.GaussianBlur(m, (0, 0), 14), 0, 1) ** 0.8
         side = (xx / sw)[..., None]
-        rimcol = (1 - side) * np.array([150, 90, 230]) + side * np.array([60, 140, 255])
-        subj = np.clip(subj + rim[..., None] * rimcol * 0.3, 0, 255)
+        rimcol = (1 - side) * np.array([170, 100, 255]) + side * np.array([70, 150, 255])
+        topw = np.clip(1.2 - yy / sh, 0.3, 1)[..., None]
+        subj = subj + rim[..., None] * rimcol * 0.7 * topw
+        # light wrap: studio ambient bleeding onto edges so subject sits in the room
+        wrap = np.clip(1 - cv2.GaussianBlur(m, (0, 0), 25), 0, 1)[..., None] * m[..., None]
+        subj = subj * (1 - 0.35 * wrap) + bgblur_sub * 0.35 * wrap * 1.6
+        subj = np.clip(subj, 0, 255)
 
         out = bg.copy()
         xs0, xs1 = max(0, x0), min(OW, x0 + sw)
