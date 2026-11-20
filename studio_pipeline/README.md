@@ -27,3 +27,12 @@ To change the studio set, edit `make_studio_bg.py` and run `python3 make_studio_
 - Sit 1–1.5 m in front of a plain, evenly lit wall, and avoid hair-coloured walls.
 - Put a window or soft light in front of you at about 45°. This also cuts the glare on your glasses: tilt the lenses slightly down or raise the light.
 - Use a clip-on mic. The audio chain only cleans the sound up; it can't replace a good recording.
+
+## Keep your real background (studio relight only)
+```bash
+python3 remove_pauses.py raw.mp4 tight.mp4
+```
+```bash
+python3 studio_relight.py tight.mp4 final.mp4
+```
+This keeps your room, removes the yellow cast and adds a soft key light on your face, faint violet/blue edge lights, a slightly dimmed and cooled wall, and cleaned audio. `--bg-dim 0.9` sets how much the wall is dimmed (1.0 = unchanged).
